@@ -1,14 +1,37 @@
-# OpenVPN Auto-Login with PIN + TOTP
+# OpenVPN Auto-Login with PIN + TOTP (Node.js)
 
 Automated OpenVPN connection using PIN + TOTP authentication. Connects with a single command and disconnects cleanly.
 
 ## Prerequisites
 
-Install required dependencies via Homebrew:
+- **Node.js**: Ensure Node.js is installed.
+- **OpenVPN**: Install via Homebrew.
 
 ```bash
-brew install openvpn oath-toolkit
+brew install openvpn
 ```
+
+## Installation
+
+1.  Clone this repository.
+2.  Install dependencies:
+
+```bash
+npm install
+```
+
+3.  Make scripts executable (if not already):
+
+```bash
+chmod +x bin/vpn-up bin/vpn-down
+```
+
+4.  (Optional) Link globally:
+
+```bash
+npm link
+```
+This allows you to run `vpn-up` and `vpn-down` from anywhere.
 
 ## Setup
 
@@ -50,15 +73,18 @@ echo 'export VPN_CONFIG="$HOME/path/to/your/config.ovpn"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-Alternatively, you can pass the config path as an argument to `vpn-up`:
-```bash
-./bin/vpn-up /path/to/config.ovpn
-```
+Alternatively, you can pass the config path as an argument to `vpn-up`.
 
 ## Usage
 
 ### Connect to VPN
 
+If `npm link` was used:
+```bash
+vpn-up
+```
+
+Otherwise:
 ```bash
 ./bin/vpn-up
 ```
@@ -69,8 +95,8 @@ Or with explicit config path:
 ```
 
 The script will:
-1. Retrieve PIN and TOTP secret from Keychain
-2. Generate current TOTP code
+1. Retrieve PIN and TOTP secret from Keychain (using system `security` command)
+2. Generate current TOTP code (using `otplib`)
 3. Combine PIN + TOTP as the password
 4. Start OpenVPN in the background
 5. Save process ID to `~/.vpn.pid`
@@ -86,6 +112,12 @@ ps -p $(cat ~/.vpn.pid 2>/dev/null) > /dev/null && echo "VPN connected" || echo 
 
 ### Disconnect from VPN
 
+If `npm link` was used:
+```bash
+vpn-down
+```
+
+Otherwise:
 ```bash
 ./bin/vpn-down
 ```
@@ -99,7 +131,7 @@ This will:
 
 1. **Authentication**: The script generates the password as `PIN + TOTP` where:
    - PIN is retrieved from Keychain (`vpn_pin`)
-   - TOTP is computed using `oathtool` from the secret stored in Keychain (`vpn_totp_secret`)
+   - TOTP is computed using the Node.js `otplib` library from the secret stored in Keychain (`vpn_totp_secret`)
 
 2. **OpenVPN Launch**: A temporary file is created with the username (ignored) and password, then OpenVPN is started with `--auth-user-pass` pointing to this file.
 
@@ -125,26 +157,14 @@ Connection logs are saved to `~/.vpn.log`:
 tail -f ~/.vpn.log
 ```
 
-### Reconnection Issues
-
-If the VPN connection drops and OpenVPN attempts to reconnect, the TOTP code used initially may expire. The script currently generates a code once at startup. For longer sessions with reconnections, you may need to restart the VPN connection manually.
-
 ### Keychain Access
 
 If you see Keychain access errors, make sure:
 - The Keychain items exist (check with `security find-generic-password -a "$USER" -s "vpn_pin"`)
 - You've granted Terminal/Cursor access to your Keychain (macOS will prompt you)
 
-### Permission Issues
-
-Make scripts executable:
-```bash
-chmod +x bin/vpn-up bin/vpn-down
-```
-
 ## Security Notes
 
 - Secrets are stored in macOS Keychain (encrypted by the OS)
-- Temporary password files are created with restricted permissions and cleaned up
+- Temporary password files are created with restricted permissions (0600) and cleaned up automatically
 - No secrets appear in command-line history or process lists
-- The TOTP secret should be in base32 format (standard for TOTP)

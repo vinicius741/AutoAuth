@@ -1,0 +1,28 @@
+{
+  "name": "autoauth",
+  "version": "1.0.0",
+  "description": "Automated OpenVPN connection using PIN + TOTP authentication. Connects with a single command and disconnects cleanly.",
+  "main": "index.js",
+  "bin": {
+    "vpn-up": "./bin/vpn-up",
+    "vpn-down": "./bin/vpn-down"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vinicius741/AutoAuth.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/vinicius741/AutoAuth/issues"
+  },
+  "homepage": "https://github.com/vinicius741/AutoAuth#readme",
+  "dependencies": {
+    "otplib": "^12.0.1"
+  }
+}

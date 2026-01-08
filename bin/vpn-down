@@ -1,44 +1,76 @@
-#!/bin/bash
+#!/usr/bin/env node
 
-set -euo pipefail
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { execSync } = require('child_process');
 
-PIDFILE="${HOME}/.vpn.pid"
-AUTHFILE="${HOME}/.vpn.auth"
+const HOME = os.homedir();
+const PIDFILE = path.join(HOME, '.vpn.pid');
+const AUTHFILE = path.join(HOME, '.vpn.auth');
 
-if [ ! -f "$PIDFILE" ]; then
-    echo "VPN is not connected (PID file not found)" >&2
-    exit 1
-fi
+if (!fs.existsSync(PIDFILE)) {
+    console.error('VPN is not connected (PID file not found)');
+    process.exit(1);
+}
 
-PID=$(cat "$PIDFILE")
+const pid = fs.readFileSync(PIDFILE, 'utf-8').trim();
 
-if ! ps -p "$PID" > /dev/null 2>&1; then
-    echo "VPN process not running (stale PID file)" >&2
-    rm -f "$PIDFILE" "$AUTHFILE"
-    exit 1
-fi
+// Check if process is running
+let isRunning = false;
+try {
+    process.kill(pid, 0);
+    isRunning = true;
+} catch (e) {
+    // Not running
+}
 
-echo "Disconnecting VPN (PID: $PID)..." >&2
+if (!isRunning) {
+    console.error('VPN process not running (stale PID file)');
+    try { fs.unlinkSync(PIDFILE); } catch(e){}
+    try { fs.unlinkSync(AUTHFILE); } catch(e){}
+    process.exit(1);
+}
 
-# Send SIGTERM to OpenVPN (graceful shutdown)
-kill "$PID" || true
+console.error(`Disconnecting VPN (PID: ${pid})...`);
 
-# Wait for process to exit (max 5 seconds)
-for i in {1..10}; do
-    if ! ps -p "$PID" > /dev/null 2>&1; then
-        break
-    fi
-    sleep 0.5
-done
+// Send SIGTERM
+try {
+    process.kill(pid, 'SIGTERM');
+} catch (e) {
+    // Ignore if already gone
+}
 
-# Force kill if still running
-if ps -p "$PID" > /dev/null 2>&1; then
-    echo "Force killing OpenVPN process..." >&2
-    kill -9 "$PID" || true
-    sleep 1
-fi
+// Wait loop
+const waitForExit = async () => {
+    for (let i = 0; i < 20; i++) { // 10 seconds timeout
+        try {
+            process.kill(pid, 0);
+            await new Promise(r => setTimeout(r, 500));
+        } catch (e) {
+            return true; // Process gone
+        }
+    }
+    return false;
+};
 
-# Cleanup
-rm -f "$PIDFILE" "$AUTHFILE"
+// Async main wrapper
+(async () => {
+    const exited = await waitForExit();
 
-echo "VPN disconnected" >&2
+    if (!exited) {
+        console.error('Force killing OpenVPN process...');
+        try {
+            process.kill(pid, 'SIGKILL');
+            await new Promise(r => setTimeout(r, 1000));
+        } catch (e) {
+            // Ignore
+        }
+    }
+
+    // Cleanup
+    if (fs.existsSync(PIDFILE)) fs.unlinkSync(PIDFILE);
+    if (fs.existsSync(AUTHFILE)) fs.unlinkSync(AUTHFILE);
+
+    console.error('VPN disconnected');
+})();

@@ -1,111 +1,160 @@
-#!/bin/bash
+#!/usr/bin/env node
 
-set -euo pipefail
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { execSync } = require('child_process');
+const { authenticator } = require('otplib');
 
-# Configuration
-PIDFILE="${HOME}/.vpn.pid"
-LOGFILE="${HOME}/.vpn.log"
-AUTHFILE="${HOME}/.vpn.auth"
+// Configuration
+const HOME = os.homedir();
+const PIDFILE = path.join(HOME, '.vpn.pid');
+const LOGFILE = path.join(HOME, '.vpn.log');
+const AUTHFILE = path.join(HOME, '.vpn.auth');
 
-# Check if VPN is already connected
-if [ -f "$PIDFILE" ]; then
-    PID=$(cat "$PIDFILE")
-    if ps -p "$PID" > /dev/null 2>&1; then
-        echo "VPN is already connected (PID: $PID)" >&2
-        exit 1
-    else
-        # Stale PID file
-        rm -f "$PIDFILE"
-    fi
-fi
+// Helper to run shell commands
+const run = (cmd) => {
+    try {
+        return execSync(cmd, { stdio: 'pipe', encoding: 'utf-8' }).trim();
+    } catch (error) {
+        throw new Error(`Command failed: ${cmd}\n${error.stderr || error.message}`);
+    }
+};
 
-# Determine config path
-VPN_CONFIG="${1:-${VPN_CONFIG:-}}"
-if [ -z "$VPN_CONFIG" ]; then
-    echo "Error: VPN config path not set." >&2
-    echo "Set VPN_CONFIG environment variable or pass config path as argument:" >&2
-    echo "  export VPN_CONFIG=\$HOME/path/to/config.ovpn" >&2
-    echo "  $0 /path/to/config.ovpn" >&2
-    exit 1
-fi
+// Main function
+const main = async () => {
+    // Check if VPN is already connected
+    if (fs.existsSync(PIDFILE)) {
+        const pid = fs.readFileSync(PIDFILE, 'utf-8').trim();
+        try {
+            // Check if process exists. 'kill -0' is a standard way to check existence without killing.
+            process.kill(pid, 0); 
+            console.error(`VPN is already connected (PID: ${pid})`);
+            process.exit(1);
+        } catch (e) {
+            // Process doesn't exist, stale PID file
+            try { fs.unlinkSync(PIDFILE); } catch (err) {}
+        }
+    }
 
-if [ ! -f "$VPN_CONFIG" ]; then
-    echo "Error: VPN config file not found: $VPN_CONFIG" >&2
-    exit 1
-fi
+    // Determine config path
+    let vpnConfig = process.argv[2] || process.env.VPN_CONFIG;
+    if (!vpnConfig) {
+        console.error('Error: VPN config path not set.');
+        console.error('Set VPN_CONFIG environment variable or pass config path as argument:');
+        console.error(`  export VPN_CONFIG=$HOME/path/to/config.ovpn`);
+        console.error(`  ${path.basename(process.argv[1])} /path/to/config.ovpn`);
+        process.exit(1);
+    }
 
-# Check dependencies
-if ! command -v openvpn > /dev/null; then
-    echo "Error: openvpn not found. Install with: brew install openvpn" >&2
-    exit 1
-fi
+    // Resolve absolute path
+    vpnConfig = path.resolve(process.cwd(), vpnConfig);
 
-if ! command -v oathtool > /dev/null; then
-    echo "Error: oathtool not found. Install with: brew install oath-toolkit" >&2
-    exit 1
-fi
+    if (!fs.existsSync(vpnConfig)) {
+        console.error(`Error: VPN config file not found: ${vpnConfig}`);
+        process.exit(1);
+    }
 
-# Retrieve secrets from Keychain
-echo "Retrieving credentials from Keychain..." >&2
+    // Check dependencies
+    try {
+        execSync('command -v openvpn');
+    } catch (e) {
+        console.error('Error: openvpn not found. Install with: brew install openvpn');
+        process.exit(1);
+    }
+    
+    // Retrieve secrets from Keychain
+    console.error('Retrieving credentials from Keychain...');
+    
+    const currentUser = process.env.USER || run('whoami');
 
-PIN=$(security find-generic-password -a "$USER" -s "vpn_pin" -w 2>/dev/null || {
-    echo "Error: Failed to retrieve PIN from Keychain. Run:" >&2
-    echo "  security add-generic-password -a \"\$USER\" -s \"vpn_pin\" -w" >&2
-    exit 1
-})
+    let pin, totpSecret;
+    try {
+        pin = run(`security find-generic-password -a "${currentUser}" -s "vpn_pin" -w`);
+    } catch (e) {
+        console.error('Error: Failed to retrieve PIN from Keychain. Run:');
+        console.error(`  security add-generic-password -a "${currentUser}" -s "vpn_pin" -w`);
+        process.exit(1);
+    }
 
-TOTP_SECRET=$(security find-generic-password -a "$USER" -s "vpn_totp_secret" -w 2>/dev/null || {
-    echo "Error: Failed to retrieve TOTP secret from Keychain. Run:" >&2
-    echo "  security add-generic-password -a \"\$USER\" -s \"vpn_totp_secret\" -w" >&2
-    exit 1
-})
+    try {
+        totpSecret = run(`security find-generic-password -a "${currentUser}" -s "vpn_totp_secret" -w`);
+    } catch (e) {
+        console.error('Error: Failed to retrieve TOTP secret from Keychain. Run:');
+        console.error(`  security add-generic-password -a "${currentUser}" -s "vpn_totp_secret" -w`);
+        process.exit(1);
+    }
 
-# Generate TOTP code
-TOTP=$(oathtool --totp -b "$TOTP_SECRET" 2>/dev/null || {
-    echo "Error: Failed to generate TOTP code. Check that your TOTP secret is valid base32." >&2
-    exit 1
-})
+    // Generate TOTP code
+    let totp;
+    try {
+        totp = authenticator.generate(totpSecret);
+    } catch (e) {
+        console.error('Error: Failed to generate TOTP code. Check that your TOTP secret is valid base32.');
+        process.exit(1);
+    }
 
-# Combine PIN + TOTP
-PASSWORD="${PIN}${TOTP}"
+    const password = `${pin}${totp}`;
 
-# Create temporary auth file
-# OpenVPN expects username on first line, password on second line
-# We use "ignored" for username since server may not require it
-cat > "$AUTHFILE" <<EOF
-ignored
-${PASSWORD}
-EOF
+    // Create temporary auth file
+    try {
+        const authContent = `ignored\n${password}`;
+        fs.writeFileSync(AUTHFILE, authContent, { mode: 0o600 });
+    } catch (e) {
+        console.error(`Error writing auth file: ${e.message}`);
+        process.exit(1);
+    }
 
-# Set restrictive permissions on auth file
-chmod 600 "$AUTHFILE"
+    // Cleanup logic
+    const cleanup = () => {
+        try {
+            if (fs.existsSync(AUTHFILE)) {
+                fs.unlinkSync(AUTHFILE);
+            }
+        } catch (err) {
+            // ignore cleanup errors
+        }
+    };
 
-# Cleanup function
-cleanup() {
-    rm -f "$AUTHFILE"
-}
+    // Ensure cleanup happens on exit
+    process.on('exit', cleanup);
+    process.on('SIGINT', () => process.exit(1));
+    process.on('uncaughtException', (err) => {
+        console.error('Uncaught Exception:', err);
+        process.exit(1);
+    });
 
-trap cleanup EXIT
+    // Start OpenVPN
+    console.error('Starting OpenVPN...');
+    
+    // Construct command
+    const openVpnCmd = `openvpn --config "${vpnConfig}" --auth-user-pass "${AUTHFILE}" --daemon --writepid "${PIDFILE}" --log "${LOGFILE}" --auth-nocache`;
+    
+    try {
+        execSync(openVpnCmd, { stdio: 'inherit' });
+    } catch (e) {
+        console.error(`Error starting OpenVPN: ${e.message}`);
+        process.exit(1);
+    }
 
-# Start OpenVPN
-echo "Starting OpenVPN..." >&2
-openvpn \
-    --config "$VPN_CONFIG" \
-    --auth-user-pass "$AUTHFILE" \
-    --daemon \
-    --writepid "$PIDFILE" \
-    --log "$LOGFILE" \
-    --auth-nocache
+    // Wait a moment for daemon to start
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-# Wait a moment for daemon to start
-sleep 2
+    // Verify it started
+    if (fs.existsSync(PIDFILE)) {
+        const newPid = fs.readFileSync(PIDFILE, 'utf-8').trim();
+        try {
+             process.kill(newPid, 0);
+             console.error(`VPN connection initiated (PID: ${newPid})`);
+             console.error(`Monitor connection: tail -f ${LOGFILE}`);
+        } catch (e) {
+             console.error(`Error: OpenVPN failed to start. Check logs: ${LOGFILE}`);
+             process.exit(1);
+        }
+    } else {
+        console.error(`Error: OpenVPN failed to start. Check logs: ${LOGFILE}`);
+        process.exit(1);
+    }
+};
 
-# Verify it started
-if [ -f "$PIDFILE" ] && ps -p "$(cat "$PIDFILE")" > /dev/null 2>&1; then
-    echo "VPN connection initiated (PID: $(cat "$PIDFILE"))" >&2
-    echo "Monitor connection: tail -f $LOGFILE" >&2
-else
-    echo "Error: OpenVPN failed to start. Check logs: $LOGFILE" >&2
-    cleanup
-    exit 1
-fi
+main();
