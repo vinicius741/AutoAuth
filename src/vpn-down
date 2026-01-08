@@ -10,7 +10,8 @@ const PIDFILE = path.join(HOME, '.vpn.pid');
 const AUTHFILE = path.join(HOME, '.vpn.auth');
 
 if (!fs.existsSync(PIDFILE)) {
-    console.error('VPN is not connected (PID file not found)');
+    console.error('VPN is not connected (PID file not found).');
+    console.error('If you think it IS running, check "ps aux | grep openvpn" and kill it manually.');
     process.exit(1);
 }
 

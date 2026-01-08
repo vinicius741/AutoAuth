@@ -62,9 +62,10 @@ Create a `.env` file in the project root to store the path to your `.ovpn` confi
     cp .env.example .env
     ```
 
-2.  Edit `.env` and set `VPN_CONFIG`:
+2.  Edit `.env` and set `VPN_CONFIG` (and optionally `VPN_USER` if it differs from your system username):
     ```bash
     VPN_CONFIG=/path/to/your/config.ovpn
+    VPN_USER=your_username
     ```
 
 Alternatively, you can still export the environment variable `VPN_CONFIG` or pass the path as an argument.

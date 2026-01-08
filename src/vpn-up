@@ -42,6 +42,8 @@ const main = async () => {
 
     // Determine config path
     let vpnConfig = process.argv[2] || process.env.VPN_CONFIG;
+    const vpnUser = process.env.VPN_USER || process.env.USER || run('whoami');
+
     if (!vpnConfig) {
         console.error('Error: VPN config path not set.');
         console.error('Set VPN_CONFIG in .env file, environment variable, or pass config path as argument:');
@@ -102,7 +104,7 @@ const main = async () => {
 
     // Create temporary auth file
     try {
-        const authContent = `ignored\n${password}`;
+        const authContent = `${vpnUser}\n${password}`;
         fs.writeFileSync(AUTHFILE, authContent, { mode: 0o600 });
     } catch (e) {
         console.error(`Error writing auth file: ${e.message}`);
@@ -120,14 +122,6 @@ const main = async () => {
         }
     };
 
-    // Ensure cleanup happens on exit
-    process.on('exit', cleanup);
-    process.on('SIGINT', () => process.exit(1));
-    process.on('uncaughtException', (err) => {
-        console.error('Uncaught Exception:', err);
-        process.exit(1);
-    });
-
     // Start OpenVPN
     console.error('Starting OpenVPN...');
     
@@ -138,6 +132,7 @@ const main = async () => {
         execSync(openVpnCmd, { stdio: 'inherit' });
     } catch (e) {
         console.error(`Error starting OpenVPN: ${e.message}`);
+        cleanup(); // Cleanup on immediate failure
         process.exit(1);
     }
 
@@ -151,12 +146,15 @@ const main = async () => {
              process.kill(newPid, 0);
              console.error(`VPN connection initiated (PID: ${newPid})`);
              console.error(`Monitor connection: tail -f ${LOGFILE}`);
+             // DO NOT cleanup here, let vpn-down or stale check handle it
         } catch (e) {
              console.error(`Error: OpenVPN failed to start. Check logs: ${LOGFILE}`);
+             cleanup();
              process.exit(1);
         }
     } else {
         console.error(`Error: OpenVPN failed to start. Check logs: ${LOGFILE}`);
+        cleanup();
         process.exit(1);
     }
 };
