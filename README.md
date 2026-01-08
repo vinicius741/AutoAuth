@@ -20,13 +20,7 @@ brew install openvpn
 npm install
 ```
 
-3.  Make scripts executable (if not already):
-
-```bash
-chmod +x src/vpn-up src/vpn-down
-```
-
-4.  (Optional) Link globally:
+3.  (Optional) Link globally:
 
 ```bash
 npm link
@@ -86,12 +80,12 @@ vpn-up
 
 Otherwise:
 ```bash
-./src/vpn-up
+node src/vpn-up
 ```
 
 Or with explicit config path:
 ```bash
-./src/vpn-up /path/to/config.ovpn
+node src/vpn-up /path/to/config.ovpn
 ```
 
 The script will:
@@ -119,7 +113,7 @@ vpn-down
 
 Otherwise:
 ```bash
-./src/vpn-down
+node src/vpn-down
 ```
 
 This will:
