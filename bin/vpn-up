@@ -1,0 +1,111 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Configuration
+PIDFILE="${HOME}/.vpn.pid"
+LOGFILE="${HOME}/.vpn.log"
+AUTHFILE="${HOME}/.vpn.auth"
+
+# Check if VPN is already connected
+if [ -f "$PIDFILE" ]; then
+    PID=$(cat "$PIDFILE")
+    if ps -p "$PID" > /dev/null 2>&1; then
+        echo "VPN is already connected (PID: $PID)" >&2
+        exit 1
+    else
+        # Stale PID file
+        rm -f "$PIDFILE"
+    fi
+fi
+
+# Determine config path
+VPN_CONFIG="${1:-${VPN_CONFIG:-}}"
+if [ -z "$VPN_CONFIG" ]; then
+    echo "Error: VPN config path not set." >&2
+    echo "Set VPN_CONFIG environment variable or pass config path as argument:" >&2
+    echo "  export VPN_CONFIG=\$HOME/path/to/config.ovpn" >&2
+    echo "  $0 /path/to/config.ovpn" >&2
+    exit 1
+fi
+
+if [ ! -f "$VPN_CONFIG" ]; then
+    echo "Error: VPN config file not found: $VPN_CONFIG" >&2
+    exit 1
+fi
+
+# Check dependencies
+if ! command -v openvpn > /dev/null; then
+    echo "Error: openvpn not found. Install with: brew install openvpn" >&2
+    exit 1
+fi
+
+if ! command -v oathtool > /dev/null; then
+    echo "Error: oathtool not found. Install with: brew install oath-toolkit" >&2
+    exit 1
+fi
+
+# Retrieve secrets from Keychain
+echo "Retrieving credentials from Keychain..." >&2
+
+PIN=$(security find-generic-password -a "$USER" -s "vpn_pin" -w 2>/dev/null || {
+    echo "Error: Failed to retrieve PIN from Keychain. Run:" >&2
+    echo "  security add-generic-password -a \"\$USER\" -s \"vpn_pin\" -w" >&2
+    exit 1
+})
+
+TOTP_SECRET=$(security find-generic-password -a "$USER" -s "vpn_totp_secret" -w 2>/dev/null || {
+    echo "Error: Failed to retrieve TOTP secret from Keychain. Run:" >&2
+    echo "  security add-generic-password -a \"\$USER\" -s \"vpn_totp_secret\" -w" >&2
+    exit 1
+})
+
+# Generate TOTP code
+TOTP=$(oathtool --totp -b "$TOTP_SECRET" 2>/dev/null || {
+    echo "Error: Failed to generate TOTP code. Check that your TOTP secret is valid base32." >&2
+    exit 1
+})
+
+# Combine PIN + TOTP
+PASSWORD="${PIN}${TOTP}"
+
+# Create temporary auth file
+# OpenVPN expects username on first line, password on second line
+# We use "ignored" for username since server may not require it
+cat > "$AUTHFILE" <<EOF
+ignored
+${PASSWORD}
+EOF
+
+# Set restrictive permissions on auth file
+chmod 600 "$AUTHFILE"
+
+# Cleanup function
+cleanup() {
+    rm -f "$AUTHFILE"
+}
+
+trap cleanup EXIT
+
+# Start OpenVPN
+echo "Starting OpenVPN..." >&2
+openvpn \
+    --config "$VPN_CONFIG" \
+    --auth-user-pass "$AUTHFILE" \
+    --daemon \
+    --writepid "$PIDFILE" \
+    --log "$LOGFILE" \
+    --auth-nocache
+
+# Wait a moment for daemon to start
+sleep 2
+
+# Verify it started
+if [ -f "$PIDFILE" ] && ps -p "$(cat "$PIDFILE")" > /dev/null 2>&1; then
+    echo "VPN connection initiated (PID: $(cat "$PIDFILE"))" >&2
+    echo "Monitor connection: tail -f $LOGFILE" >&2
+else
+    echo "Error: OpenVPN failed to start. Check logs: $LOGFILE" >&2
+    cleanup
+    exit 1
+fi

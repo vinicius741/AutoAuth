@@ -1,0 +1,44 @@
+#!/bin/bash
+
+set -euo pipefail
+
+PIDFILE="${HOME}/.vpn.pid"
+AUTHFILE="${HOME}/.vpn.auth"
+
+if [ ! -f "$PIDFILE" ]; then
+    echo "VPN is not connected (PID file not found)" >&2
+    exit 1
+fi
+
+PID=$(cat "$PIDFILE")
+
+if ! ps -p "$PID" > /dev/null 2>&1; then
+    echo "VPN process not running (stale PID file)" >&2
+    rm -f "$PIDFILE" "$AUTHFILE"
+    exit 1
+fi
+
+echo "Disconnecting VPN (PID: $PID)..." >&2
+
+# Send SIGTERM to OpenVPN (graceful shutdown)
+kill "$PID" || true
+
+# Wait for process to exit (max 5 seconds)
+for i in {1..10}; do
+    if ! ps -p "$PID" > /dev/null 2>&1; then
+        break
+    fi
+    sleep 0.5
+done
+
+# Force kill if still running
+if ps -p "$PID" > /dev/null 2>&1; then
+    echo "Force killing OpenVPN process..." >&2
+    kill -9 "$PID" || true
+    sleep 1
+fi
+
+# Cleanup
+rm -f "$PIDFILE" "$AUTHFILE"
+
+echo "VPN disconnected" >&2
