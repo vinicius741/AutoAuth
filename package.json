@@ -8,6 +8,8 @@
     "vpn-down": "./src/vpn-down"
   },
   "scripts": {
+    "vpn-up": "node src/vpn-up",
+    "vpn-down": "node src/vpn-down",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

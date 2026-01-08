@@ -73,6 +73,11 @@ Alternatively, you can still export the environment variable `VPN_CONFIG` or pas
 
 ### Connect to VPN
 
+Recommended way:
+```bash
+npm run vpn-up
+```
+
 If `npm link` was used:
 ```bash
 vpn-up
@@ -85,26 +90,17 @@ node src/vpn-up
 
 Or with explicit config path:
 ```bash
-node src/vpn-up /path/to/config.ovpn
+npm run vpn-up -- /path/to/config.ovpn
 ```
 
 The script will:
-1. Retrieve PIN and TOTP secret from Keychain (using system `security` command)
-2. Generate current TOTP code (using `otplib`)
-3. Combine PIN + TOTP as the password
-4. Start OpenVPN in the background
-5. Save process ID to `~/.vpn.pid`
-
-Check connection status:
-```bash
-# View OpenVPN log
-tail -f ~/.vpn.log
-
-# Check if process is running
-ps -p $(cat ~/.vpn.pid 2>/dev/null) > /dev/null && echo "VPN connected" || echo "VPN not connected"
-```
-
+...
 ### Disconnect from VPN
+
+Recommended way:
+```bash
+npm run vpn-down
+```
 
 If `npm link` was used:
 ```bash
