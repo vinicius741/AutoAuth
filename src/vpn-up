@@ -31,12 +31,12 @@ const main = async () => {
         const pid = fs.readFileSync(PIDFILE, 'utf-8').trim();
         try {
             // Check if process exists. 'kill -0' is a standard way to check existence without killing.
-            process.kill(pid, 0); 
+            process.kill(pid, 0);
             console.error(`VPN is already connected (PID: ${pid})`);
             process.exit(1);
         } catch (e) {
             // Process doesn't exist, stale PID file
-            try { fs.unlinkSync(PIDFILE); } catch (err) {}
+            try { fs.unlinkSync(PIDFILE); } catch (err) { }
         }
     }
 
@@ -61,17 +61,17 @@ const main = async () => {
         process.exit(1);
     }
 
-    // Check dependencies
-    try {
-        execSync('command -v openvpn');
-    } catch (e) {
-        console.error('Error: openvpn not found. Install with: brew install openvpn');
-        process.exit(1);
-    }
-    
-    // Retrieve secrets from Keychain
-    console.error('Retrieving credentials from Keychain...');
-    
+        // Check dependencies
+        let openVpnBin;
+        try {
+            openVpnBin = execSync('which openvpn', { encoding: 'utf-8' }).trim();
+        } catch (e) {
+            console.error('Error: openvpn not found. Install with: brew install openvpn');
+            process.exit(1);
+        }
+        
+        // Retrieve secrets from Keychain    console.error('Retrieving credentials from Keychain...');
+
     const currentUser = process.env.USER || run('whoami');
 
     let pin, totpSecret;
@@ -99,9 +99,7 @@ const main = async () => {
         console.error('Error: Failed to generate TOTP code. Check that your TOTP secret is valid base32.');
         process.exit(1);
     }
-
     const password = `${pin}${totp}`;
-
     // Create temporary auth file
     try {
         const authContent = `${vpnUser}\n${password}`;
@@ -122,16 +120,16 @@ const main = async () => {
         }
     };
 
-    // Start OpenVPN
-    console.error('Starting OpenVPN...');
-    
-    // Construct command
-    const openVpnCmd = `openvpn --config "${vpnConfig}" --auth-user-pass "${AUTHFILE}" --daemon --writepid "${PIDFILE}" --log "${LOGFILE}" --auth-nocache`;
-    
-    try {
-        execSync(openVpnCmd, { stdio: 'inherit' });
-    } catch (e) {
-        console.error(`Error starting OpenVPN: ${e.message}`);
+        // Start OpenVPN
+        console.error('Starting OpenVPN (sudo privileges required)...');
+        
+        // Construct command
+        const openVpnCmd = `sudo "${openVpnBin}" --config "${vpnConfig}" --auth-user-pass "${AUTHFILE}" --daemon --writepid "${PIDFILE}" --log "${LOGFILE}" --auth-nocache`;
+        
+        try {
+            // We use inherit to allow user to type sudo password if needed
+            execSync(openVpnCmd, { stdio: 'inherit' });
+        } catch (e) {        console.error(`Error starting OpenVPN: ${e.message}`);
         cleanup(); // Cleanup on immediate failure
         process.exit(1);
     }
@@ -139,7 +137,7 @@ const main = async () => {
     console.error('VPN process initiated. Monitoring logs for connection status...');
 
     const tail = spawn('tail', ['-f', LOGFILE]);
-    
+
     // Timeout after 30 seconds
     const timeout = setTimeout(() => {
         console.error('Error: Connection timed out (30s).');
@@ -147,17 +145,17 @@ const main = async () => {
         cleanup();
         // Try to kill the vpn process if it exists
         if (fs.existsSync(PIDFILE)) {
-             try { 
-                 const pid = fs.readFileSync(PIDFILE, 'utf-8').trim();
-                 process.kill(pid, 'SIGTERM'); 
-             } catch(e){}
+            try {
+                const pid = fs.readFileSync(PIDFILE, 'utf-8').trim();
+                process.kill(pid, 'SIGTERM');
+            } catch (e) { }
         }
         process.exit(1);
     }, 30000);
 
     tail.stdout.on('data', (data) => {
         const output = data.toString();
-        
+
         if (output.includes('Initialization Sequence Completed')) {
             console.error('✅ VPN Connected Successfully!');
             clearTimeout(timeout);

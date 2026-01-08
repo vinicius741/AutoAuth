@@ -33,8 +33,13 @@ if (!fs.existsSync(PIDFILE)) {
                 killedAny = true;
             } catch (e) {
                 if (e.code === 'EPERM') {
-                    console.error(`Error: Permission denied killing PID ${p}. Try running with sudo:`);
-                    console.error('  sudo npm run vpn-down');
+                    console.error(`Permission denied killing PID ${p}. Trying sudo...`);
+                    try {
+                        execSync(`sudo kill ${p}`, { stdio: 'inherit' });
+                        killedAny = true;
+                    } catch (err) {
+                        console.error(`Error killing PID ${p} even with sudo: ${err.message}`);
+                    }
                 } else {
                     console.error(`Error killing PID ${p}: ${e.message}`);
                 }
@@ -85,7 +90,9 @@ console.error(`Disconnecting VPN (PID: ${pid})...`);
 try {
     process.kill(pid, 'SIGTERM');
 } catch (e) {
-    // Ignore if already gone
+    if (e.code === 'EPERM') {
+        try { execSync(`sudo kill ${pid}`, { stdio: 'inherit' }); } catch(err){}
+    }
 }
 
 // Wait loop
@@ -95,7 +102,14 @@ const waitForExit = async () => {
             process.kill(pid, 0);
             await new Promise(r => setTimeout(r, 500));
         } catch (e) {
-            return true; // Process gone
+            if (e.code === 'EPERM') {
+                // If we can't check it, assume it's running. Check with sudo kill -0?
+                // Actually 'kill -0' usually works on macOS for others? No.
+                // Just wait.
+                await new Promise(r => setTimeout(r, 500));
+            } else {
+                return true; // Process gone (ESRCH)
+            }
         }
     }
     return false;
@@ -109,9 +123,10 @@ const waitForExit = async () => {
         console.error('Force killing OpenVPN process...');
         try {
             process.kill(pid, 'SIGKILL');
-            await new Promise(r => setTimeout(r, 1000));
         } catch (e) {
-            // Ignore
+             if (e.code === 'EPERM') {
+                 try { execSync(`sudo kill -9 ${pid}`, { stdio: 'inherit' }); } catch(err){}
+             }
         }
     }
 
