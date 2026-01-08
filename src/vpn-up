@@ -120,16 +120,23 @@ const main = async () => {
         }
     };
 
-        // Start OpenVPN
-        console.error('Starting OpenVPN (sudo privileges required)...');
-        
-        // Construct command
-        const openVpnCmd = `sudo "${openVpnBin}" --config "${vpnConfig}" --auth-user-pass "${AUTHFILE}" --daemon --writepid "${PIDFILE}" --log "${LOGFILE}" --auth-nocache`;
-        
-        try {
-            // We use inherit to allow user to type sudo password if needed
-            execSync(openVpnCmd, { stdio: 'inherit' });
-        } catch (e) {        console.error(`Error starting OpenVPN: ${e.message}`);
+            // Start OpenVPN
+
+            console.error('Starting OpenVPN...');
+
+            
+
+            // Construct command
+
+            const openVpnCmd = `"${openVpnBin}" --config "${vpnConfig}" --auth-user-pass "${AUTHFILE}" --daemon --writepid "${PIDFILE}" --log "${LOGFILE}" --auth-nocache`;
+
+            
+
+            try {
+
+                execSync(openVpnCmd, { stdio: 'inherit' });
+
+            } catch (e) {        console.error(`Error starting OpenVPN: ${e.message}`);
         cleanup(); // Cleanup on immediate failure
         process.exit(1);
     }

@@ -32,17 +32,7 @@ if (!fs.existsSync(PIDFILE)) {
                 process.kill(p, 'SIGTERM');
                 killedAny = true;
             } catch (e) {
-                if (e.code === 'EPERM') {
-                    console.error(`Permission denied killing PID ${p}. Trying sudo...`);
-                    try {
-                        execSync(`sudo kill ${p}`, { stdio: 'inherit' });
-                        killedAny = true;
-                    } catch (err) {
-                        console.error(`Error killing PID ${p} even with sudo: ${err.message}`);
-                    }
-                } else {
-                    console.error(`Error killing PID ${p}: ${e.message}`);
-                }
+                console.error(`Error killing PID ${p}: ${e.message}`);
             }
         }
         
@@ -90,9 +80,7 @@ console.error(`Disconnecting VPN (PID: ${pid})...`);
 try {
     process.kill(pid, 'SIGTERM');
 } catch (e) {
-    if (e.code === 'EPERM') {
-        try { execSync(`sudo kill ${pid}`, { stdio: 'inherit' }); } catch(err){}
-    }
+    // Ignore if already gone
 }
 
 // Wait loop
@@ -102,14 +90,7 @@ const waitForExit = async () => {
             process.kill(pid, 0);
             await new Promise(r => setTimeout(r, 500));
         } catch (e) {
-            if (e.code === 'EPERM') {
-                // If we can't check it, assume it's running. Check with sudo kill -0?
-                // Actually 'kill -0' usually works on macOS for others? No.
-                // Just wait.
-                await new Promise(r => setTimeout(r, 500));
-            } else {
-                return true; // Process gone (ESRCH)
-            }
+            return true; // Process gone
         }
     }
     return false;
@@ -124,9 +105,7 @@ const waitForExit = async () => {
         try {
             process.kill(pid, 'SIGKILL');
         } catch (e) {
-             if (e.code === 'EPERM') {
-                 try { execSync(`sudo kill -9 ${pid}`, { stdio: 'inherit' }); } catch(err){}
-             }
+             console.error(`Error force killing PID ${pid}: ${e.message}`);
         }
     }
 
