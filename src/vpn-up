@@ -6,6 +6,9 @@ const os = require('os');
 const { execSync } = require('child_process');
 const { authenticator } = require('otplib');
 
+// Load environment variables from .env file (if it exists)
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
 // Configuration
 const HOME = os.homedir();
 const PIDFILE = path.join(HOME, '.vpn.pid');
@@ -41,9 +44,10 @@ const main = async () => {
     let vpnConfig = process.argv[2] || process.env.VPN_CONFIG;
     if (!vpnConfig) {
         console.error('Error: VPN config path not set.');
-        console.error('Set VPN_CONFIG environment variable or pass config path as argument:');
-        console.error(`  export VPN_CONFIG=$HOME/path/to/config.ovpn`);
-        console.error(`  ${path.basename(process.argv[1])} /path/to/config.ovpn`);
+        console.error('Set VPN_CONFIG in .env file, environment variable, or pass config path as argument:');
+        console.error(`  1. Create .env file in project root: VPN_CONFIG=/path/to/config.ovpn`);
+        console.error(`  2. Export var: export VPN_CONFIG=$HOME/path/to/config.ovpn`);
+        console.error(`  3. Pass arg: ${path.basename(process.argv[1])} /path/to/config.ovpn`);
         process.exit(1);
     }
 

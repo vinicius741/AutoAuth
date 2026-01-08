@@ -23,7 +23,7 @@ npm install
 3.  Make scripts executable (if not already):
 
 ```bash
-chmod +x bin/vpn-up bin/vpn-down
+chmod +x src/vpn-up src/vpn-down
 ```
 
 4.  (Optional) Link globally:
@@ -61,19 +61,19 @@ security add-generic-password -a "$USER" -s "vpn_pin" -w
 
 ### 2. Configure Your OpenVPN Profile Path
 
-Set the path to your `.ovpn` file by exporting an environment variable:
+Create a `.env` file in the project root to store the path to your `.ovpn` configuration file.
 
-```bash
-export VPN_CONFIG="$HOME/path/to/your/config.ovpn"
-```
+1.  Copy the example file:
+    ```bash
+    cp .env.example .env
+    ```
 
-Or add it to your `~/.zshrc` or `~/.bash_profile`:
-```bash
-echo 'export VPN_CONFIG="$HOME/path/to/your/config.ovpn"' >> ~/.zshrc
-source ~/.zshrc
-```
+2.  Edit `.env` and set `VPN_CONFIG`:
+    ```bash
+    VPN_CONFIG=/path/to/your/config.ovpn
+    ```
 
-Alternatively, you can pass the config path as an argument to `vpn-up`.
+Alternatively, you can still export the environment variable `VPN_CONFIG` or pass the path as an argument.
 
 ## Usage
 
@@ -86,12 +86,12 @@ vpn-up
 
 Otherwise:
 ```bash
-./bin/vpn-up
+./src/vpn-up
 ```
 
 Or with explicit config path:
 ```bash
-./bin/vpn-up /path/to/config.ovpn
+./src/vpn-up /path/to/config.ovpn
 ```
 
 The script will:
@@ -119,7 +119,7 @@ vpn-down
 
 Otherwise:
 ```bash
-./bin/vpn-down
+./src/vpn-down
 ```
 
 This will:
