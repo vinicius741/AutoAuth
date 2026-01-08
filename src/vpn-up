@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const { authenticator } = require('otplib');
 
 // Load environment variables from .env file (if it exists)
@@ -136,27 +136,45 @@ const main = async () => {
         process.exit(1);
     }
 
-    // Wait a moment for daemon to start
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.error('VPN process initiated. Monitoring logs for connection status...');
 
-    // Verify it started
-    if (fs.existsSync(PIDFILE)) {
-        const newPid = fs.readFileSync(PIDFILE, 'utf-8').trim();
-        try {
-             process.kill(newPid, 0);
-             console.error(`VPN connection initiated (PID: ${newPid})`);
-             console.error(`Monitor connection: tail -f ${LOGFILE}`);
-             // DO NOT cleanup here, let vpn-down or stale check handle it
-        } catch (e) {
-             console.error(`Error: OpenVPN failed to start. Check logs: ${LOGFILE}`);
-             cleanup();
-             process.exit(1);
-        }
-    } else {
-        console.error(`Error: OpenVPN failed to start. Check logs: ${LOGFILE}`);
+    const tail = spawn('tail', ['-f', LOGFILE]);
+    
+    // Timeout after 30 seconds
+    const timeout = setTimeout(() => {
+        console.error('Error: Connection timed out (30s).');
+        tail.kill();
         cleanup();
+        // Try to kill the vpn process if it exists
+        if (fs.existsSync(PIDFILE)) {
+             try { 
+                 const pid = fs.readFileSync(PIDFILE, 'utf-8').trim();
+                 process.kill(pid, 'SIGTERM'); 
+             } catch(e){}
+        }
         process.exit(1);
-    }
+    }, 30000);
+
+    tail.stdout.on('data', (data) => {
+        const output = data.toString();
+        
+        if (output.includes('Initialization Sequence Completed')) {
+            console.error('✅ VPN Connected Successfully!');
+            clearTimeout(timeout);
+            tail.kill();
+            cleanup(); // Securely remove auth file
+            process.exit(0);
+        }
+
+        if (output.includes('AUTH_FAILED') || output.includes('process exiting') || output.includes('Exiting due to fatal error')) {
+            console.error('❌ VPN Connection Failed (Authentication Failure or Error).');
+            console.error(`Check logs for details: ${LOGFILE}`);
+            clearTimeout(timeout);
+            tail.kill();
+            cleanup();
+            process.exit(1);
+        }
+    });
 };
 
 main();
