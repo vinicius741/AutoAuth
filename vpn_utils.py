@@ -7,18 +7,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def get_keychain_password(account, service):
-    try:
-        result = subprocess.run(
-            ['security', 'find-generic-password', '-a', account, '-s', service, '-w'],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        raise Exception(f"Failed to retrieve {service} from Keychain: {e.stderr.strip()}")
-
 def generate_totp(secret):
     try:
         totp = pyotp.TOTP(secret)

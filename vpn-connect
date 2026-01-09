@@ -5,7 +5,6 @@ import subprocess
 import time
 import tempfile
 from vpn_utils import (
-    get_keychain_password,
     generate_totp,
     read_env_var,
     read_pid_file,
@@ -71,28 +70,26 @@ def main():
             log_message(conn_log, f"VPN config file not found: {vpn_config}", 'ERROR')
             sys.exit(1)
         
-        print_status("Reading credentials from Keychain...", 'INFO')
-        log_message(conn_log, "Reading credentials from Keychain", 'INFO')
-        
-        current_user = os.getenv('USER', subprocess.run(['whoami'], capture_output=True, text=True).stdout.strip())
+        print_status("Reading credentials from .env file...", 'INFO')
+        log_message(conn_log, "Reading credentials from .env file", 'INFO')
         
         try:
-            pin = get_keychain_password(current_user, 'vpn_pin')
+            pin = read_env_var('VPN_PIN')
             print_status("PIN retrieved successfully", 'INFO')
-            log_message(conn_log, "PIN retrieved from Keychain", 'INFO')
+            log_message(conn_log, "PIN retrieved from .env file", 'INFO')
         except Exception as e:
             print_status(f"Failed to retrieve PIN: {str(e)}", 'ERROR')
-            print_status(f"Run: security add-generic-password -a \"{current_user}\" -s \"vpn_pin\" -w", 'INFO')
+            print_status("Add VPN_PIN to your .env file", 'INFO')
             log_message(conn_log, f"Failed to retrieve PIN: {str(e)}", 'ERROR')
             sys.exit(1)
         
         try:
-            totp_secret = get_keychain_password(current_user, 'vpn_totp_secret')
+            totp_secret = read_env_var('VPN_TOTP_SECRET')
             print_status("TOTP secret retrieved successfully", 'INFO')
-            log_message(conn_log, "TOTP secret retrieved from Keychain", 'INFO')
+            log_message(conn_log, "TOTP secret retrieved from .env file", 'INFO')
         except Exception as e:
             print_status(f"Failed to retrieve TOTP secret: {str(e)}", 'ERROR')
-            print_status(f"Run: security add-generic-password -a \"{current_user}\" -s \"vpn_totp_secret\" -w", 'INFO')
+            print_status("Add VPN_TOTP_SECRET to your .env file", 'INFO')
             log_message(conn_log, f"Failed to retrieve TOTP secret: {str(e)}", 'ERROR')
             sys.exit(1)
         

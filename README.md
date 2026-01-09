@@ -4,10 +4,10 @@ Automated OpenVPN connection using PIN + TOTP authentication. Connects with a si
 
 ## Features
 
-- **One-Command Connection**: Connect to VPN with automatic PIN + TOTP authentication
-- **Real-Time Status**: Monitor connection progress with colored output
-- **Secure Credential Storage**: Uses macOS Keychain for PIN and TOTP secret
-- **No Sudo Required**: Runs without sudo by default
+ - **One-Command Connection**: Connect to VPN with automatic PIN + TOTP authentication
+ - **Real-Time Status**: Monitor connection progress with colored output
+ - **Environment-Based Credentials**: Store PIN and TOTP secret in .env file
+ - **No Sudo Required**: Runs without sudo by default
 - **Process Management**: Graceful shutdown with PID tracking
 - **Comprehensive Logging**: All logs stored in project directory (`logs/`)
 - **Status Monitoring**: Check connection state, duration, and IP address
@@ -43,6 +43,10 @@ Edit `.env` and set your VPN configuration:
 ```bash
 VPN_CONFIG=/path/to/your/config.ovpn
 VPN_USERNAME=your_username
+
+# Authentication credentials
+VPN_PIN=your_pin
+VPN_TOTP_SECRET=your_totp_secret
 ```
 
 Optional settings:
@@ -51,29 +55,7 @@ VPN_PID_FILE=.vpn.pid  # Default: .vpn.pid
 VPN_LOG_DIR=logs/       # Default: logs/
 ```
 
-4. **Store credentials in macOS Keychain**
-
-You need to store two items in your Keychain:
-- Your **PIN** (static password prefix)
-- Your **TOTP secret** (base32 secret for generating time-based codes)
-
-Run these commands (you'll be prompted to enter each value securely):
-
-```bash
-# Store PIN
-security add-generic-password -a "$USER" -s "vpn_pin" -w
-
-# Store TOTP secret (paste your base32 secret when prompted)
-security add-generic-password -a "$USER" -s "vpn_totp_secret" -w
-```
-
-**Important:** When prompted, paste your PIN or TOTP secret and press Enter. The `-w` flag ensures the input is hidden.
-
-To update existing entries:
-```bash
-security delete-generic-password -a "$USER" -s "vpn_pin" 2>/dev/null
-security add-generic-password -a "$USER" -s "vpn_pin" -w
-```
+**Security Note**: The `.env` file contains sensitive credentials. Never commit this file to version control. It's included in `.gitignore`.
 
 ## Usage
 
@@ -88,7 +70,7 @@ security add-generic-password -a "$USER" -s "vpn_pin" -w
 ```
 
 The script will:
-1. Retrieve PIN and TOTP secret from Keychain
+1. Read PIN and TOTP secret from .env file
 2. Generate TOTP code automatically
 3. Combine PIN + TOTP for authentication
 4. Start OpenVPN and monitor connection
@@ -142,8 +124,8 @@ Displays:
 ## How It Works
 
 1. **Authentication**: The script generates the password as `PIN + TOTP` where:
-   - PIN is retrieved from Keychain (`vpn_pin`)
-   - TOTP is computed using the `pyotp` library from the secret stored in Keychain (`vpn_totp_secret`)
+   - PIN is read from `.env` file (`VPN_PIN`)
+   - TOTP is computed using the `pyotp` library from the secret in `.env` file (`VPN_TOTP_SECRET`)
 
 2. **OpenVPN Launch**: A temporary file is created with the username and password, then OpenVPN is started with `--auth-user-pass` pointing to this file
 
@@ -177,19 +159,23 @@ which openvpn
 brew install openvpn
 ```
 
-### Keychain Access
+### Credentials Not Found
 
-If you see Keychain access errors:
+If you see "Failed to retrieve PIN" or "Failed to retrieve TOTP secret" errors:
 
 ```bash
-# Verify PIN exists in Keychain
-security find-generic-password -a "$USER" -s "vpn_pin"
+# Check that .env file exists
+ls -la .env
 
-# Verify TOTP secret exists
-security find-generic-password -a "$USER" -s "vpn_totp_secret"
+# Verify .env file has required variables
+cat .env
 
-# Make sure you've granted Terminal access to your Keychain (macOS will prompt you)
+# Ensure .env file is properly formatted (no extra spaces around =)
 ```
+
+Make sure you have these variables in your `.env` file:
+- `VPN_PIN` - Your static PIN
+- `VPN_TOTP_SECRET` - Your base32 TOTP secret
 
 ### Connection Timeouts
 
@@ -246,10 +232,11 @@ autoauth/
 
 ## Security Notes
 
-- Secrets are stored in macOS Keychain (encrypted by the OS)
+- Secrets are stored in `.env` file (included in `.gitignore` - never commit this file)
 - Temporary password files are created with restricted permissions (0600) and cleaned up automatically
 - No secrets appear in command-line history or process lists
 - All scripts are executable and have proper permissions
+- Consider using environment variable managers (e.g., `direnv`, `envchain`) for added security
 
 ## Contributing
 
