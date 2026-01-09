@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+import os
+import sys
+import subprocess
+import time
+import tempfile
+from vpn_utils import (
+    get_keychain_password,
+    generate_totp,
+    read_env_var,
+    read_pid_file,
+    write_pid_file,
+    is_process_running,
+    get_log_file,
+    get_connection_log_file,
+    setup_logging,
+    log_message,
+    cleanup_auth_file
+)
+
+def print_status(message, level='INFO'):
+    level_colors = {
+        'INFO': '\033[94m',
+        'SUCCESS': '\033[92m',
+        'WARNING': '\033[93m',
+        'ERROR': '\033[91m',
+        'CONNECTING': '\033[93m'
+    }
+    color = level_colors.get(level, '')
+    reset = '\033[0m'
+    print(f"{color}[{level}]{reset} {message}", flush=True)
+
+def check_openvpn_installed():
+    try:
+        subprocess.run(['which', 'openvpn'], check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def main():
+    print_status("Starting VPN connection...", 'INFO')
+    
+    vpn_log = setup_logging(get_log_file())
+    conn_log = setup_logging(get_connection_log_file())
+    log_message(conn_log, "VPN connection initiated", 'INFO')
+    
+    if not check_openvpn_installed():
+        print_status("OpenVPN not found. Install with: brew install openvpn", 'ERROR')
+        log_message(conn_log, "OpenVPN not found", 'ERROR')
+        sys.exit(1)
+    
+    existing_pid = read_pid_file()
+    if existing_pid and is_process_running(existing_pid):
+        print_status(f"VPN is already connected (PID: {existing_pid})", 'WARNING')
+        log_message(conn_log, f"VPN already running (PID: {existing_pid})", 'WARNING')
+        sys.exit(1)
+    
+    try:
+        vpn_config = sys.argv[1] if len(sys.argv) > 1 else None
+        if not vpn_config:
+            vpn_config = read_env_var('VPN_CONFIG')
+        
+        if not vpn_config:
+            print_status("VPN config path not set. Set VPN_CONFIG in .env or pass as argument", 'ERROR')
+            log_message(conn_log, "VPN config path not provided", 'ERROR')
+            sys.exit(1)
+        
+        vpn_config = os.path.abspath(vpn_config)
+        if not os.path.exists(vpn_config):
+            print_status(f"VPN config file not found: {vpn_config}", 'ERROR')
+            log_message(conn_log, f"VPN config file not found: {vpn_config}", 'ERROR')
+            sys.exit(1)
+        
+        print_status("Reading credentials from Keychain...", 'INFO')
+        log_message(conn_log, "Reading credentials from Keychain", 'INFO')
+        
+        current_user = os.getenv('USER', subprocess.run(['whoami'], capture_output=True, text=True).stdout.strip())
+        
+        try:
+            pin = get_keychain_password(current_user, 'vpn_pin')
+            print_status("PIN retrieved successfully", 'INFO')
+            log_message(conn_log, "PIN retrieved from Keychain", 'INFO')
+        except Exception as e:
+            print_status(f"Failed to retrieve PIN: {str(e)}", 'ERROR')
+            print_status(f"Run: security add-generic-password -a \"{current_user}\" -s \"vpn_pin\" -w", 'INFO')
+            log_message(conn_log, f"Failed to retrieve PIN: {str(e)}", 'ERROR')
+            sys.exit(1)
+        
+        try:
+            totp_secret = get_keychain_password(current_user, 'vpn_totp_secret')
+            print_status("TOTP secret retrieved successfully", 'INFO')
+            log_message(conn_log, "TOTP secret retrieved from Keychain", 'INFO')
+        except Exception as e:
+            print_status(f"Failed to retrieve TOTP secret: {str(e)}", 'ERROR')
+            print_status(f"Run: security add-generic-password -a \"{current_user}\" -s \"vpn_totp_secret\" -w", 'INFO')
+            log_message(conn_log, f"Failed to retrieve TOTP secret: {str(e)}", 'ERROR')
+            sys.exit(1)
+        
+        print_status("Generating TOTP code...", 'INFO')
+        try:
+            totp_code = generate_totp(totp_secret)
+            password = pin + totp_code
+            print_status("TOTP code generated", 'INFO')
+            log_message(conn_log, "TOTP code generated successfully", 'INFO')
+        except Exception as e:
+            print_status(f"Failed to generate TOTP: {str(e)}", 'ERROR')
+            log_message(conn_log, f"Failed to generate TOTP: {str(e)}", 'ERROR')
+            sys.exit(1)
+        
+        username = read_env_var('VPN_USERNAME')
+        
+        auth_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.auth')
+        auth_file.write(f"{username}\n{password}\n")
+        auth_file.close()
+        os.chmod(auth_file.name, 0o600)
+        
+        print_status("Starting OpenVPN...", 'INFO')
+        log_message(conn_log, f"Starting OpenVPN with config: {vpn_config}", 'INFO')
+        
+        try:
+            process = subprocess.Popen(
+                ['openvpn', '--config', vpn_config, '--auth-user-pass', auth_file.name, '--daemon', '--writepid', os.path.abspath(read_env_var('VPN_PID_FILE', '.vpn.pid')), '--log', vpn_log, '--auth-nocache'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+        except Exception as e:
+            print_status(f"Failed to start OpenVPN: {str(e)}", 'ERROR')
+            log_message(conn_log, f"Failed to start OpenVPN: {str(e)}", 'ERROR')
+            cleanup_auth_file(auth_file.name)
+            sys.exit(1)
+        
+        print_status("Monitoring connection status...", 'CONNECTING')
+        log_message(conn_log, "Monitoring connection status", 'INFO')
+        
+        timeout = 30
+        start_time = time.time()
+        connected = False
+        
+        while time.time() - start_time < timeout:
+            time.sleep(1)
+            
+            if os.path.exists(vpn_log):
+                with open(vpn_log, 'r') as f:
+                    log_content = f.read()
+                    
+                    if 'Initialization Sequence Completed' in log_content:
+                        connected = True
+                        break
+                    
+                    if 'AUTH_FAILED' in log_content or 'process exiting' in log_content or 'Exiting due to fatal error' in log_content:
+                        print_status("VPN connection failed (authentication error)", 'ERROR')
+                        log_message(conn_log, "VPN connection failed: authentication error", 'ERROR')
+                        break
+        
+        if connected:
+            print_status("VPN Connected Successfully!", 'SUCCESS')
+            log_message(conn_log, "VPN connected successfully", 'SUCCESS')
+            
+            new_pid = read_pid_file()
+            if new_pid:
+                print_status(f"VPN Process ID: {new_pid}", 'INFO')
+        else:
+            print_status("Connection timed out. Check logs for details.", 'ERROR')
+            log_message(conn_log, "Connection timed out", 'ERROR')
+            
+            new_pid = read_pid_file()
+            if new_pid and is_process_running(new_pid):
+                try:
+                    subprocess.run(['kill', str(new_pid)], check=True)
+                    log_message(conn_log, f"Killed VPN process (PID: {new_pid})", 'INFO')
+                except subprocess.CalledProcessError:
+                    pass
+        
+        cleanup_auth_file(auth_file.name)
+        
+        if not connected:
+            sys.exit(1)
+        
+    except KeyboardInterrupt:
+        print_status("\nInterrupted by user", 'WARNING')
+        log_message(conn_log, "Connection interrupted by user", 'WARNING')
+        cleanup_auth_file(auth_file.name)
+        sys.exit(1)
+    except Exception as e:
+        print_status(f"Unexpected error: {str(e)}", 'ERROR')
+        log_message(conn_log, f"Unexpected error: {str(e)}", 'ERROR')
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()

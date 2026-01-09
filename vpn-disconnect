@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+import os
+import sys
+import subprocess
+from vpn_utils import (
+    read_pid_file,
+    is_process_running,
+    get_connection_log_file,
+    log_message
+)
+
+def print_status(message, level='INFO'):
+    level_colors = {
+        'INFO': '\033[94m',
+        'SUCCESS': '\033[92m',
+        'WARNING': '\033[93m',
+        'ERROR': '\033[91m'
+    }
+    color = level_colors.get(level, '')
+    reset = '\033[0m'
+    print(f"{color}[{level}]{reset} {message}", flush=True)
+
+def find_openvpn_processes():
+    try:
+        result = subprocess.run(
+            ['pgrep', '-x', 'openvpn'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        if result.returncode == 0:
+            return result.stdout.strip().split('\n')
+        return []
+    except Exception:
+        return []
+
+def kill_process(pid, signal='SIGTERM'):
+    try:
+        subprocess.run(['kill', signal, str(pid)], check=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def main():
+    print_status("Disconnecting VPN...", 'INFO')
+    
+    conn_log = get_connection_log_file()
+    log_message(conn_log, "VPN disconnection initiated", 'INFO')
+    
+    pid_file = os.path.abspath(os.getenv('VPN_PID_FILE', '.vpn.pid'))
+    
+    pid = read_pid_file()
+    
+    if not pid:
+        print_status("PID file not found. Checking for OpenVPN processes...", 'WARNING')
+        log_message(conn_log, "PID file not found, searching for processes", 'WARNING')
+        
+        openvpn_pids = find_openvpn_processes()
+        
+        if not openvpn_pids:
+            print_status("No OpenVPN processes found running", 'INFO')
+            log_message(conn_log, "No OpenVPN processes found", 'INFO')
+            sys.exit(0)
+        
+        print_status(f"Found OpenVPN process(es): {', '.join(openvpn_pids)}", 'INFO')
+        log_message(conn_log, f"Found OpenVPN processes: {', '.join(openvpn_pids)}", 'INFO')
+        
+        killed_any = False
+        for openvpn_pid in openvpn_pids:
+            print_status(f"Stopping process {openvpn_pid}...", 'INFO')
+            if kill_process(openvpn_pid):
+                killed_any = True
+                log_message(conn_log, f"Sent SIGTERM to process {openvpn_pid}", 'INFO')
+        
+        if killed_any:
+            import time
+            time.sleep(2)
+            
+            remaining = find_openvpn_processes()
+            if remaining:
+                print_status(f"Processes still running: {', '.join(remaining)}", 'WARNING')
+                log_message(conn_log, f"Processes still running after SIGTERM: {', '.join(remaining)}", 'WARNING')
+                
+                for remaining_pid in remaining:
+                    print_status(f"Force killing process {remaining_pid}...", 'INFO')
+                    if kill_process(remaining_pid, 'SIGKILL'):
+                        log_message(conn_log, f"Force killed process {remaining_pid}", 'INFO')
+            else:
+                print_status("All OpenVPN processes terminated", 'SUCCESS')
+                log_message(conn_log, "All OpenVPN processes terminated", 'SUCCESS')
+        
+        sys.exit(0)
+    
+    if not is_process_running(pid):
+        print_status(f"VPN process not running (stale PID file)", 'WARNING')
+        log_message(conn_log, f"Stale PID file for PID {pid}", 'WARNING')
+        
+        try:
+            os.remove(pid_file)
+            log_message(conn_log, "Removed stale PID file", 'INFO')
+        except Exception as e:
+            print_status(f"Failed to remove PID file: {str(e)}", 'WARNING')
+            log_message(conn_log, f"Failed to remove PID file: {str(e)}", 'ERROR')
+        
+        sys.exit(1)
+    
+    print_status(f"Stopping VPN (PID: {pid})...", 'INFO')
+    log_message(conn_log, f"Stopping VPN process {pid}", 'INFO')
+    
+    if not kill_process(pid):
+        print_status(f"Failed to send SIGTERM to process {pid}", 'ERROR')
+        log_message(conn_log, f"Failed to send SIGTERM to process {pid}", 'ERROR')
+        sys.exit(1)
+    
+    print_status("Waiting for process to exit...", 'INFO')
+    
+    import time
+    timeout = 10
+    start_time = time.time()
+    
+    while time.time() - start_time < timeout:
+        if not is_process_running(pid):
+            print_status("VPN disconnected", 'SUCCESS')
+            log_message(conn_log, f"VPN process {pid} exited gracefully", 'SUCCESS')
+            
+            try:
+                os.remove(pid_file)
+                log_message(conn_log, "Removed PID file", 'INFO')
+            except Exception as e:
+                print_status(f"Failed to remove PID file: {str(e)}", 'WARNING')
+                log_message(conn_log, f"Failed to remove PID file: {str(e)}", 'ERROR')
+            
+            sys.exit(0)
+        time.sleep(0.5)
+    
+    print_status("Process did not exit gracefully, force killing...", 'WARNING')
+    log_message(conn_log, f"Process {pid} did not exit, force killing", 'WARNING')
+    
+    if kill_process(pid, 'SIGKILL'):
+        print_status("VPN disconnected (force killed)", 'SUCCESS')
+        log_message(conn_log, f"VPN process {pid} force killed", 'SUCCESS')
+    else:
+        print_status(f"Failed to kill process {pid}", 'ERROR')
+        log_message(conn_log, f"Failed to kill process {pid}", 'ERROR')
+        sys.exit(1)
+    
+    try:
+        os.remove(pid_file)
+        log_message(conn_log, "Removed PID file", 'INFO')
+    except Exception as e:
+        print_status(f"Failed to remove PID file: {str(e)}", 'WARNING')
+        log_message(conn_log, f"Failed to remove PID file: {str(e)}", 'ERROR')
+
+if __name__ == '__main__':
+    main()
